@@ -1,0 +1,155 @@
+#Project for predicting the manner in which exercise was done#
+##Vijay Zutshi##
+
+##Introduction##
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+##Data for the project##
+
+The training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+##Goal##
+
+The goal of the project is to predict the manner in which people did the exercise. The variable used to predict will be "classe". The project describes various models used and how cross validation was done to check the outcome. It also includes the sample error and the choices made. Finally the prediction model was tested with 20 different test cases.
+
+##Library used##
+```{r echo = TRUE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+##library(rattle)
+library(randomForest)
+```
+
+Loading the training and testing data
+```{r, echo= TRUE}
+set.seed(12345)
+
+training_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testing_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training_data <- read.csv(url(training_url), na.strings=c("NA","#DIV/0!",""))
+testing_data <- read.csv(url(testing_url), na.strings=c("NA","#DIV/0!",""))
+```
+Dividing the training data set into two groups
+```{r echo = TRUE}
+in_Training <- createDataPartition(training_data$classe, p=0.6, list=FALSE)
+my_Training_data <- training_data[in_Training, ]
+my_Testing_data <- training_data[-in_Training, ]
+dim(my_Training_data); dim(my_Testing_data)
+```
+
+Remove Near Zero Variance variables
+```{r echo = TRUE}
+near_zero_var <- nearZeroVar(my_Training_data, saveMetrics=TRUE)
+my_Training_data <- my_Training_data[,near_zero_var$nzv==FALSE]
+
+near_zero_var<- nearZeroVar(my_Testing_data,saveMetrics=TRUE)
+my_Testing_data <- my_Testing_data[,near_zero_var$nzv==FALSE]
+```
+
+We will now remove the first column from the my_Training_data set
+```{r echo = TRUE}
+my_Training_data <- my_Training_data[c(-1)]
+```
+
+Procedure to Clean variables with more than 60% NA
+```{r echo = TRUE}
+training_V_data <- my_Training_data
+for(i in 1:length(my_Training_data)) {
+    if( sum( is.na( my_Training_data[, i] ) ) /nrow(my_Training_data) >= .7) {
+        for(j in 1:length(training_V_data)) {
+            if( length( grep(names(my_Training_data[i]), names(training_V_data)[j]) ) == 1)  {
+                training_V_data <- training_V_data[ , -j]
+            }   
+        } 
+    }
+}
+
+# Set back to the original variable name
+my_Training_data <- training_V_data
+rm(training_V_data)
+```
+
+The next step is to transform the Testing and training data sets
+```{r echo = TRUE}
+transform1 <- colnames(my_Training_data)
+transform2 <- colnames(my_Training_data[, -58])  # remove the classe column
+my_Testing_data <- my_Testing_data[transform1]         # allow only variables in myTesting that are also in myTraining
+testing_data <- testing_data[transform2]             # allow only variables in testing that are also in myTraining
+
+dim(my_Testing_data)
+```
+
+Now we will combine the data into the same type
+```{r echo = TRUE}
+for (i in 1:length(testing_data) ) {
+    for(j in 1:length(my_Training_data)) {
+        if( length( grep(names(my_Training_data[i]), names(testing_data)[j]) ) == 1)  {
+            class(testing_data[j]) <- class(my_Training_data[i])
+        }      
+    }      
+}
+
+# To get the same class between testing and myTraining
+testing_data <- rbind(my_Training_data[2, -58] , testing_data)
+testing_data <- testing_data[-1,]
+```
+
+Using the Decision Trees for prediction 
+```{r echo = TRUE}
+set.seed(12345)
+model_Fit <- rpart(classe ~ ., data=my_Training_data, method="class")
+rpart.plot(model_Fit)
+```
+
+```{r echo = TRUE}
+predict_1 <- predict(model_Fit, my_Testing_data, type = "class")
+con_mat_tree <- confusionMatrix(predict_1, my_Testing_data$classe)
+con_mat_tree
+```
+
+```{r echo = TRUE}
+plot(con_mat_tree$table, col = con_mat_tree$byClass, main = paste("Decision Tree Confusion Matrix: Accuracy =", round(con_mat_tree$overall['Accuracy'], 4)))
+```
+
+We will now use the Random Forests method for prediction
+```{r echo = TRUE}
+set.seed(12345)
+model_Fit_B <- randomForest(classe ~ ., data=my_Training_data)
+predict_B <- predict(model_Fit_B, my_Testing_data, type = "class")
+con_mat_rf <- confusionMatrix(predict_B, my_Testing_data$classe)
+con_mat_rf
+```
+
+```{r echo = TRUE}
+plot(model_Fit_B)
+```
+
+```{r echo = TRUE}
+plot(con_mat_rf$table, col = con_mat_tree$byClass, main = paste("Random Forest Confusion Matrix: Accuracy =", round(con_mat_rf$overall['Accuracy'], 4)))
+```
+
+Random Forests gave an Accuracy of 99.89%, which was more accurate than the Decision Trees or GBM. The expected out-of-sample error is 100-99.89 = 0.11%.
+```{r echo = TRUE}
+predict_B2 <- predict(model_Fit_B, testing_data, type = "class")
+predict_B2
+```
+
+```{r echo = TRUE}
+# Write the results to a text file for submission
+final_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("pmc_project_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+# final_write_files(predict_B2)
+```
+
